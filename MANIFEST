@@ -4,4 +4,4 @@ MANIFEST
 README
 RpmFind.pm
 test.pl
-test_wwwsearch.pl
+rpmfind

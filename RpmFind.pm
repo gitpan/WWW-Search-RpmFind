@@ -2,15 +2,19 @@
 # RpmFind.pm
 # by Alain Barbet alian@alianwebserver.com
 # Copyright (C) 2001
-# $Id: RpmFind.pm,v 1.1 2001/10/03 23:29:51 alian Exp $
+# $Id: RpmFind.pm,v 1.2 2002/08/09 14:38:16 alian Exp $
 #
 
 package WWW::Search::RpmFind;
+
+use strict;
+use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
+
 require Exporter;
 @EXPORT = qw();
 @EXPORT_OK = qw();
 @ISA = qw(WWW::Search Exporter);
-$VERSION = ('$Revision: 1.1 $ ' =~ /(\d+\.\d+)/)[0];
+$VERSION = ('$Revision: 1.2 $ ' =~ /(\d+\.\d+)/)[0];
 
 use Carp ();
 use strict;
@@ -18,56 +22,53 @@ use WWW::Search(qw (generic_option strip_tags));
 require WWW::SearchResult;
 
 # private
-sub native_setup_search
-	{
-    	my($self, $native_query, $native_options_ref) = @_;
-    	$self->user_agent('alian');
-    	$self->{_next_to_retrieve} = 0;
-  	$self->{'search_base_url'} = 'http://rpmfind.net';
-	if (!defined($self->{_options})) {
-	$self->{_options} = 
-	  { 
-	   'query' 	=> $native_query,
-	   'submit'     => "Search ...",
-	   'search_url' => $self->{'search_base_url'}.'/linux/rpm2html/search.php'
-        };}
-    	my($options_ref) = $self->{_options};
-    	if (defined($native_options_ref)) 
-    		{
-		# Copy in new options.
-		foreach (keys %$native_options_ref) 
-		  {$options_ref->{$_} = $native_options_ref->{$_};}
-    		}
-    	# Process the options.
-    	# (Now in sorted order for consistency regarless of hash ordering.)
-    	my($options) = '';
-    	foreach (sort keys %$options_ref) 
-    		{
-		# printf STDERR "option: $_ is " . $options_ref->{$_} . "\n";
-		next if (generic_option($_));
-		$options .= $_ . '=' . $options_ref->{$_} . '&' 
-		  if (defined $options_ref->{$_});
-    		}
+sub native_setup_search	{
+  my($self, $native_query, $native_options_ref) = @_;
+  $self->user_agent('WWW::Search::RpmFind - alian@cpan.org');
+  $self->{_next_to_retrieve} = 0;
+  $self->{'search_base_url'} = 'http://www.rpmfind.net';
+  if (!defined($self->{_options})) {
+    $self->{_options} = 
+      { 
+       'query' 	=> $native_query,
+       'submit'     => "Search ...",
+       'search_url' => $self->{'search_base_url'}.'/linux/rpm2html/search.php'
+      };}
+  my($options_ref) = $self->{_options};
+  if (defined($native_options_ref)) {
+    # Copy in new options.
+    foreach (keys %$native_options_ref) 
+      {$options_ref->{$_} = $native_options_ref->{$_};}
+  }
+  # Process the options.
+  # (Now in sorted order for consistency regarless of hash ordering.)
+  my($options) = '';
+  foreach (sort keys %$options_ref) {
+    # printf STDERR "option: $_ is " . $options_ref->{$_} . "\n";
+    next if (generic_option($_));
+    $options .= $_ . '=' . $options_ref->{$_} . '&' 
+      if (defined $options_ref->{$_});
+  }
 
-    	# Finally figure out the url.
-    	$self->{_base_url} = $self->{_next_url} 
-	  = $self->{_options}{'search_url'} ."?" . $options;
-    	print STDERR $self->{_base_url} . "\n" if ($self->{_debug});	
-	}
+  # Finally figure out the url.
+  $self->{_base_url} = $self->{_next_url} 
+    = $self->{_options}{'search_url'} ."?" . $options;
+  print STDERR $self->{_base_url} . "\n" if ($self->{_debug});	
+}
 
 # private
-sub create_hit
-  {
-    my ($self,$url,$titre,$description)=@_;
+sub create_hit  {
+    my ($self,$url,$titre,$description,$rpm)=@_;
     my $hit = new WWW::SearchResult;
     $hit->add_url($url);
     $hit->title(strip_tags($titre));
     $hit->description(strip_tags($description));
+    $hit->source($rpm);
     print STDERR " *** Found item\n\tUrl: $url\n",
 	"\tTitle:",$hit->title(),"\n\tDescription:",$hit->description(),"\n"	
 	  if ($self->{_debug});
     push(@{$self->{cache}},$hit);
-    return 1;
+    return $hit;
   }
 
 # private
@@ -98,8 +99,7 @@ sub native_retrieve_some
 	$stop++;
 	next if m@^$@; # short circuit for blank lines
 	# HEADER PARSING: find the number of hits
-	if (m!</p><h1 \s align='center'>RPM \s resource .*</h1>
-	    <h3 \s align='center'> \s Found \s (\d*) \s RPM \s for !x)
+	if (m!<h3 \s align='center'> \s Found \s (\d*) \s RPM \s for !x)
 	  {
 	    $self->approximate_result_count($1);
 	    print STDERR "*** $1 result\n"  if ($self->{_debug});
@@ -111,24 +111,17 @@ sub native_retrieve_some
      my @rest = split(/<tr /, $rest);
      undef @l; $stop = 0; 
      # walk on each part. One part = one hit
+#    print "$#rest elems to parse\n";
      foreach (@rest)
 	 {	
 	   # url + title (Summary) + description (Distribution)
 	   if (m!bgcolor='.*'><td><a \s href='(.*)'>.*</a></td>
-		 <td>(.*)</td><td>(.*)</td><td><a \s href='.*'>.*</a></td></tr>!x)
-	     {
-		 my ($url, $titre, $desc) = ($1, $2, $3);
-		 # Create hit
-		 my $hit = new WWW::SearchResult;
-		 $hit->add_url($url);
-		 $hit->title($titre);
-		 $hit->description($desc);
-		 print STDERR " *** Found item\n\tUrl: $url\n",
-		   "\tTitle:",$hit->title(),"\n\tDescription:",
-		     $hit->description(),"\n" if ($self->{_debug});
-		 push(@{$self->{cache}},$hit);
-		     $hits_found++;
-	     }
+		 <td>(.*)</td><td>(.*)</td><td><a \s href='(.*)'>.*</a>
+                 </td></tr>!x) {
+	     # Create hit
+	     $self->create_hit($1,$2,$3,$4);
+	     $hits_found++;
+	   }
 	   elsif (m!<table \s\s width=624 \s\s cellpadding=0 \s 
 		    cellspacing=0 \s border=0>!x)
 	   { $end =1; last; }
@@ -145,12 +138,9 @@ WWW::Search::RpmFind - class for searching RpmFind.net
 =head1 SYNOPSIS
 
   #!/usr/bin/perl
-
   use WWW::Search;
   use strict;
-
-  my $moteur = 'RpmFind';
-  my $oSearch = new WWW::Search($moteur);
+  my $oSearch = new WWW::Search('RpmFind');
 
   # Create request
   $oSearch->native_query(WWW::Search::escape_query("cgi"));
@@ -161,7 +151,8 @@ WWW::Search::RpmFind - class for searching RpmFind.net
       print "---------------------------------\n",
     	      "Url    :", $oResult->url,"\n",
 	      "Titre  :", $oResult->title,"\n",
-            "Distrib:", $oResult->description,"\n";
+              "Distrib:", $oResult->description,"\n",
+	          "Rpm:", $oResult->source,"\n";
     }
 
 =head1 DESCRIPTION
